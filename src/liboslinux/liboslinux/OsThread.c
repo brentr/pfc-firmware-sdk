@@ -169,7 +169,7 @@ static i32 OsThread_Attributes(pthread_attr_t* attribute,
          break;
       }
 
-      if (stackSize <= PTHREAD_STACK_MIN)
+      if (stackSize <= (size_t)PTHREAD_STACK_MIN)
       {
          stackSize = 2*PTHREAD_STACK_MIN;
       }

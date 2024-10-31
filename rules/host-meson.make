@@ -46,7 +46,7 @@ $(STATEDIR)/host-meson.compile:
 # Special dirs to avoid collisions with host-python3
 HOST_MESON_INSTALL_OPT	:= \
 	install \
-	--prefix=/ \
+	--prefix=/usr \
 	--install-lib=/lib/meson \
 	--install-scripts=/lib/meson \
 	--root=$(HOST_MESON_PKGDIR)

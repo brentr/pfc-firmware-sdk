@@ -39,6 +39,8 @@ NFSUTILS_CONF_ENV	:= \
 NFSUTILS_CONF_TOOL	:= autoconf
 NFSUTILS_CONF_OPT	:= \
 	$(CROSS_AUTOCONF_USR) \
+        CPPFLAGS="-I/usr/include/tirpc" \
+        CFLAGS="-O2 -ltirpc" \
 	--exec-prefix=/usr \
 	--disable-nfsv4 \
 	--disable-nfsv41 \

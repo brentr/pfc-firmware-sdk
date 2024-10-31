@@ -1,0 +1,16 @@
+--- a/internal/base.mk	2024-10-30 18:51:00.490108098 -0700
++++ b/internal/base.mk	2024-10-25 22:04:37.000000000 -0700
+@@ -24,10 +24,9 @@
+ $(ESC_COLON) := :
+ ESC_DOLLAR := $$
+ $(ESC_DOLLAR) := $$
+-ESC_SPACE := 
+-ESC_SPACE += 
+-$(ESC_SPACE) := 
+-$(ESC_SPACE) += 
++E :=
++ESC_SPACE := $E $E
++$(ESC_SPACE) := $E $E
+ 
+ # ! Do not remove the two blank lines in this definition !
+ define NEWLINE

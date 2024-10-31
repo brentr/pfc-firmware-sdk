@@ -43,7 +43,11 @@ $(STATEDIR)/host-ct-build.extract:
 	@$(call extract, HOST_CT_BUILD)
 # In-project patching of ct-build is discouraged in favour of change requests
 # aimed at the maintainers (Team DevTools) 
-#	@$(call patchin, HOST_CT_BUILD)
+	@$(call patchin, HOST_CT_BUILD)
+	echo $(HOST_CT_BUILD)
+	echo $(HOST_CT_BUILD_DIR)
+	echo $(PWD)
+	echo $(HOST_CT_BUILD_SOURCE)
 	@$(call touch)
 
 # ----------------------------------------------------------------------------

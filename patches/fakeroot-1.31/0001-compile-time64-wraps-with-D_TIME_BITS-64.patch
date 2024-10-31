@@ -1,0 +1,393 @@
+From 5af3efd9f2987dd3a687941d12bb08322e8d19ec Mon Sep 17 00:00:00 2001
+From: Shengjing Zhu <shengjing.zhu@canonical.com>
+Date: Wed, 1 Mar 2023 15:40:13 +0800
+Subject: [PATCH] Compile time64 wraps with -D_TIME_BITS=64
+
+This ensures using right stat struct on 32bit architectures.
+Closes: #1030638
+---
+ Makefile.am          |  13 ++-
+ libfakeroot.c        |  74 -------------
+ libfakeroot_time64.c | 255 +++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 263 insertions(+), 79 deletions(-)
+ create mode 100644 libfakeroot_time64.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 76210b5..4c1dfb1 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -2,20 +2,23 @@ AUTOMAKE_OPTIONS=foreign
+ ACLOCAL_AMFLAGS = -I build-aux
+ SUBDIRS=doc scripts test
+ 
+-noinst_LTLIBRARIES = libcommunicate.la libmacosx.la
++noinst_LTLIBRARIES = libcommunicate.la libmacosx.la libfakeroot_time64.la
+ libcommunicate_la_SOURCES = communicate.c
+ 
+ libmacosx_la_SOURCES = libfakeroot_inode64.c libfakeroot_unix2003.c patchattr.h
+ 
++libfakeroot_time64_la_SOURCES = libfakeroot_time64.c
++libfakeroot_time64_la_CPPFLAGS = -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64
++
+ lib_LTLIBRARIES=libfakeroot.la
+ libfakeroot_la_SOURCES=libfakeroot.c statconv/glibc/linux/alpha/stats.h wrapdef.h  wrapstruct.h communicate.h
+ libfakeroot_la_LDFLAGS=-release 0
+ if MACOSX
+-libfakeroot_la_DEPENDENCIES=wrapdef.h wrapstruct.h libcommunicate.la libmacosx.la $(LTLIBOBJS)
+-libfakeroot_la_LIBADD = libcommunicate.la libmacosx.la $(LTLIBOBJS)
++libfakeroot_la_DEPENDENCIES=wrapdef.h wrapstruct.h libfakeroot_time64.la libcommunicate.la libmacosx.la $(LTLIBOBJS)
++libfakeroot_la_LIBADD = libfakeroot_time64.la libcommunicate.la libmacosx.la $(LTLIBOBJS)
+ else !MACOSX
+-libfakeroot_la_DEPENDENCIES=wrapdef.h wrapstruct.h libcommunicate.la $(LTLIBOBJS)
+-libfakeroot_la_LIBADD = libcommunicate.la $(LTLIBOBJS)
++libfakeroot_la_DEPENDENCIES=wrapdef.h wrapstruct.h libfakeroot_time64.la libcommunicate.la $(LTLIBOBJS)
++libfakeroot_la_LIBADD = libfakeroot_time64.la libcommunicate.la $(LTLIBOBJS)
+ endif !MACOSX
+ 
+ bin_PROGRAMS=faked
+diff --git a/libfakeroot.c b/libfakeroot.c
+index 26a3e90..587a472 100644
+--- a/libfakeroot.c
++++ b/libfakeroot.c
+@@ -2631,77 +2631,3 @@ int sysinfo(int command, char *buf, long count)
+     }
+ }
+ #endif
+-
+-#ifdef TIME64_HACK
+-int WRAP_LSTAT64_TIME64 LSTAT64_TIME64_ARG(int ver,
+-		       const char *file_name,
+-		       struct stat64 *statbuf){
+-
+-  int r;
+-
+-#ifdef LIBFAKEROOT_DEBUGGING
+-  if (fakeroot_debug) {
+-    fprintf(stderr, "lstat[time64] file_name %s\n", file_name);
+-  }
+-#endif /* LIBFAKEROOT_DEBUGGING */
+-  r=NEXT_LSTAT64_TIME64(ver, file_name, statbuf);
+-  if(r)
+-    return -1;
+-  SEND_GET_STAT64(statbuf, ver);
+-  return 0;
+-}
+-
+-
+-int WRAP_STAT64_TIME64 STAT64_TIME64_ARG(int ver,
+-		       const char *file_name,
+-		       struct stat64 *st){
+-  int r;
+-
+-#ifdef LIBFAKEROOT_DEBUGGING
+-  if (fakeroot_debug) {
+-    fprintf(stderr, "stat64[time64] file_name %s\n", file_name);
+-  }
+-#endif /* LIBFAKEROOT_DEBUGGING */
+-  r=NEXT_STAT64_TIME64(ver, file_name, st);
+-  if(r)
+-    return -1;
+-  SEND_GET_STAT64(st,ver);
+-  return 0;
+-}
+-
+-
+-int WRAP_FSTAT64_TIME64 FSTAT64_TIME64_ARG(int ver,
+-			int fd,
+-			struct stat64 *st){
+-
+-  int r;
+-
+-#ifdef LIBFAKEROOT_DEBUGGING
+-  if (fakeroot_debug) {
+-    fprintf(stderr, "fstat64[time64] fd %d\n", fd);
+-  }
+-#endif /* LIBFAKEROOT_DEBUGGING */
+-  r=NEXT_FSTAT64_TIME64(ver, fd, st);
+-  if(r)
+-    return -1;
+-  SEND_GET_STAT64(st,ver);
+-  return 0;
+-}
+-
+-int WRAP_FSTATAT64_TIME64 FSTATAT64_TIME64_ARG(int ver,
+-			     int dir_fd,
+-			     const char *path,
+-			     struct stat64 *st,
+-			     int flags){
+-
+-
+-  int r;
+-
+-  r=NEXT_FSTATAT64_TIME64(ver, dir_fd, path, st, flags);
+-  if(r)
+-    return -1;
+-  SEND_GET_STAT64(st,ver);
+-  return 0;
+-}
+-
+-#endif /* TIME64_HACK */
+diff --git a/libfakeroot_time64.c b/libfakeroot_time64.c
+new file mode 100644
+index 0000000..5b93a84
+--- /dev/null
++++ b/libfakeroot_time64.c
+@@ -0,0 +1,255 @@
++#include "config.h"
++#include "communicate.h"
++
++#include <stdio.h>
++
++#ifdef HAVE_SYS_ACL_H
++#include <sys/acl.h>
++#endif /* HAVE_SYS_ACL_H */
++#ifdef HAVE_SYS_CAPABILITY_H
++#include <sys/capability.h>
++#endif
++#if HAVE_FTS_H
++#include <fts.h>
++#endif /* HAVE_FTS_H */
++#ifdef HAVE_SYS_SYSMACROS_H
++# include <sys/sysmacros.h>
++#endif
++
++#include "wrapped.h"
++
++extern void load_library_symbols(void);
++
++#ifdef LIBFAKEROOT_DEBUGGING
++extern int fakeroot_debug;
++#endif /* LIBFAKEROOT_DEBUGGING */
++
++
++extern void send_get_fakem(struct fake_msg *buf);
++
++#ifdef TIME64_HACK
++
++#ifdef STUPID_ALPHA_HACK
++#define SEND_GET_STAT64_TIME64(a,b) send_get_stat64_time64(a,b)
++#else
++#define SEND_GET_STAT64_TIME64(a,b) send_get_stat64_time64(a)
++#endif
++
++void cpyfakemstat64_time64(struct fake_msg *f,
++                 const struct stat64 *st
++#ifdef STUPID_ALPHA_HACK
++                 , int ver
++#endif
++                 ){
++#ifndef STUPID_ALPHA_HACK
++  f->st.mode =st->st_mode;
++  f->st.ino  =st->st_ino ;
++  f->st.uid  =st->st_uid ;
++  f->st.gid  =st->st_gid ;
++  f->st.dev  =st->st_dev ;
++  f->st.rdev =st->st_rdev;
++
++  /* DO copy the nlink count. Although the system knows this
++     one better, we need it for unlink().
++     This actually opens up a race condition, if another command
++     makes a hardlink on a file, while we try to unlink it. This
++     may cause the record to be deleted, while the link continues
++     to live on the disk. But the chance is small, and unlikely
++     to occur in practical fakeroot conditions. */
++
++  f->st.nlink=st->st_nlink;
++#else
++  switch(ver) {
++	  case _STAT_VER_KERNEL:
++  f->st.mode  = ((struct fakeroot_kernel_stat *)st)->st_mode;
++  f->st.ino   = ((struct fakeroot_kernel_stat *)st)->st_ino;
++  f->st.uid   = ((struct fakeroot_kernel_stat *)st)->st_uid;
++  f->st.gid   = ((struct fakeroot_kernel_stat *)st)->st_gid;
++  f->st.dev   = ((struct fakeroot_kernel_stat *)st)->st_dev;
++  f->st.rdev  = ((struct fakeroot_kernel_stat *)st)->st_rdev;
++  f->st.nlink = ((struct fakeroot_kernel_stat *)st)->st_nlink;
++  break;
++	  case _STAT_VER_GLIBC2:
++  f->st.mode  = ((struct fakeroot_glibc2_stat *)st)->st_mode;
++  f->st.ino   = ((struct fakeroot_glibc2_stat *)st)->st_ino;
++  f->st.uid   = ((struct fakeroot_glibc2_stat *)st)->st_uid;
++  f->st.gid   = ((struct fakeroot_glibc2_stat *)st)->st_gid;
++  f->st.dev   = ((struct fakeroot_glibc2_stat *)st)->st_dev;
++  f->st.rdev  = ((struct fakeroot_glibc2_stat *)st)->st_rdev;
++  f->st.nlink = ((struct fakeroot_glibc2_stat *)st)->st_nlink;
++  break;
++	  case _STAT_VER_GLIBC2_1:
++  f->st.mode  = ((struct fakeroot_glibc21_stat *)st)->st_mode;
++  f->st.ino   = ((struct fakeroot_glibc21_stat *)st)->st_ino;
++  f->st.uid   = ((struct fakeroot_glibc21_stat *)st)->st_uid;
++  f->st.gid   = ((struct fakeroot_glibc21_stat *)st)->st_gid;
++  f->st.dev   = ((struct fakeroot_glibc21_stat *)st)->st_dev;
++  f->st.rdev  = ((struct fakeroot_glibc21_stat *)st)->st_rdev;
++  f->st.nlink = ((struct fakeroot_glibc21_stat *)st)->st_nlink;
++  break;
++		  default:
++  f->st.mode  = st->st_mode;
++  f->st.ino   = st->st_ino;
++  f->st.uid   = st->st_uid;
++  f->st.gid   = st->st_gid;
++  f->st.dev   = st->st_dev;
++  f->st.rdev  = st->st_rdev;
++  f->st.nlink = st->st_nlink;
++  break;
++  }
++#endif
++}
++void cpystat64fakem_time64(struct stat64 *st,
++                 const struct fake_msg *f
++#ifdef STUPID_ALPHA_HACK
++                 , int ver
++#endif
++                 ){
++#ifndef STUPID_ALPHA_HACK
++  st->st_mode =f->st.mode;
++  st->st_ino  =f->st.ino ;
++  st->st_uid  =f->st.uid ;
++  st->st_gid  =f->st.gid ;
++  st->st_dev  =f->st.dev ;
++  st->st_rdev =f->st.rdev;
++  /* DON'T copy the nlink count! The system always knows
++     this one better! */
++  /*  st->st_nlink=f->st.nlink;*/
++#else
++  switch(ver) {
++	  case _STAT_VER_KERNEL:
++  ((struct fakeroot_kernel_stat *)st)->st_mode = f->st.mode;
++  ((struct fakeroot_kernel_stat *)st)->st_ino  = f->st.ino;
++  ((struct fakeroot_kernel_stat *)st)->st_uid  = f->st.uid;
++  ((struct fakeroot_kernel_stat *)st)->st_gid  = f->st.gid;
++  ((struct fakeroot_kernel_stat *)st)->st_dev  = f->st.dev;
++  ((struct fakeroot_kernel_stat *)st)->st_rdev = f->st.rdev;
++  break;
++	  case _STAT_VER_GLIBC2:
++  ((struct fakeroot_glibc2_stat *)st)->st_mode = f->st.mode;
++  ((struct fakeroot_glibc2_stat *)st)->st_ino  = f->st.ino;
++  ((struct fakeroot_glibc2_stat *)st)->st_uid  = f->st.uid;
++  ((struct fakeroot_glibc2_stat *)st)->st_gid  = f->st.gid;
++  ((struct fakeroot_glibc2_stat *)st)->st_dev  = f->st.dev;
++  ((struct fakeroot_glibc2_stat *)st)->st_rdev = f->st.rdev;
++  break;
++		  case _STAT_VER_GLIBC2_1:
++  ((struct fakeroot_glibc21_stat *)st)->st_mode = f->st.mode;
++  ((struct fakeroot_glibc21_stat *)st)->st_ino  = f->st.ino;
++  ((struct fakeroot_glibc21_stat *)st)->st_uid  = f->st.uid;
++  ((struct fakeroot_glibc21_stat *)st)->st_gid  = f->st.gid;
++  ((struct fakeroot_glibc21_stat *)st)->st_dev  = f->st.dev;
++  ((struct fakeroot_glibc21_stat *)st)->st_rdev = f->st.rdev;
++  break;
++		  default:
++  st->st_mode =f->st.mode;
++  st->st_ino  =f->st.ino ;
++  st->st_uid  =f->st.uid ;
++  st->st_gid  =f->st.gid ;
++  st->st_dev  =f->st.dev ;
++  st->st_rdev =f->st.rdev;
++  break;
++  }
++#endif
++}
++
++void send_get_stat64_time64(struct stat64 *st
++#ifdef STUPID_ALPHA_HACK
++                     , int ver
++#endif
++                    )
++{
++  struct fake_msg buf;
++
++#ifndef FAKEROOT_FAKENET
++  if(init_get_msg()!=-1)
++#endif /* ! FAKEROOT_FAKENET */
++  {
++#ifndef STUPID_ALPHA_HACK
++    cpyfakemstat64_time64(&buf,st);
++#else
++    cpyfakemstat64_time64(&buf,st,ver);
++#endif
++
++    buf.id=stat_func;
++    send_get_fakem(&buf);
++#ifndef STUPID_ALPHA_HACK
++    cpystat64fakem_time64(st,&buf);
++#else
++    cpystat64fakem_time64(st,&buf,ver);
++#endif
++  }
++}
++
++int WRAP_LSTAT64_TIME64 LSTAT64_TIME64_ARG(int ver,
++		       const char *file_name,
++		       struct stat64 *statbuf){
++
++  int r;
++
++#ifdef LIBFAKEROOT_DEBUGGING
++  if (fakeroot_debug) {
++    fprintf(stderr, "lstat[time64] file_name %s\n", file_name);
++  }
++#endif /* LIBFAKEROOT_DEBUGGING */
++  r=NEXT_LSTAT64_TIME64(ver, file_name, statbuf);
++  if(r)
++    return -1;
++  SEND_GET_STAT64_TIME64(statbuf, ver);
++  return 0;
++}
++
++
++int WRAP_STAT64_TIME64 STAT64_TIME64_ARG(int ver,
++		       const char *file_name,
++		       struct stat64 *st){
++  int r;
++
++#ifdef LIBFAKEROOT_DEBUGGING
++  if (fakeroot_debug) {
++    fprintf(stderr, "stat64[time64] file_name %s\n", file_name);
++  }
++#endif /* LIBFAKEROOT_DEBUGGING */
++  r=NEXT_STAT64_TIME64(ver, file_name, st);
++  if(r)
++    return -1;
++  SEND_GET_STAT64_TIME64(st,ver);
++  return 0;
++}
++
++
++int WRAP_FSTAT64_TIME64 FSTAT64_TIME64_ARG(int ver,
++			int fd,
++			struct stat64 *st){
++
++  int r;
++
++#ifdef LIBFAKEROOT_DEBUGGING
++  if (fakeroot_debug) {
++    fprintf(stderr, "fstat64[time64] fd %d\n", fd);
++  }
++#endif /* LIBFAKEROOT_DEBUGGING */
++  r=NEXT_FSTAT64_TIME64(ver, fd, st);
++  if(r)
++    return -1;
++  SEND_GET_STAT64_TIME64(st,ver);
++  return 0;
++}
++
++int WRAP_FSTATAT64_TIME64 FSTATAT64_TIME64_ARG(int ver,
++			     int dir_fd,
++			     const char *path,
++			     struct stat64 *st,
++			     int flags){
++
++
++  int r;
++
++  r=NEXT_FSTATAT64_TIME64(ver, dir_fd, path, st, flags);
++  if(r)
++    return -1;
++  SEND_GET_STAT64_TIME64(st,ver);
++  return 0;
++}
++
++#endif /* TIME64_HACK */
+-- 
+2.39.2
+
